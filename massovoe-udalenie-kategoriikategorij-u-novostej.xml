@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<dleplugin>
+	<name>Массовое удаление категории/категорий у новостей</name>
+	<description>Расширение функционала &quot;массовых действий&quot;: этот плагин позволяет удалять только выбранные категории у новостей. Не только лишь все, а нужные и выбранные.
+
+~~~~~~~~
+from @boyanich with love :3</description>
+	<icon></icon>
+	<version></version>
+	<dleversion>15.3</dleversion>
+	<versioncompare>greater</versioncompare>
+	<upgradeurl></upgradeurl>
+	<filedelete>0</filedelete>
+	<needplugin></needplugin>
+	<mnotice>0</mnotice>
+	<mysqlinstall><![CDATA[]]></mysqlinstall>
+	<mysqlupgrade><![CDATA[]]></mysqlupgrade>
+	<mysqlenable><![CDATA[]]></mysqlenable>
+	<mysqldisable><![CDATA[]]></mysqldisable>
+	<mysqldelete><![CDATA[]]></mysqldelete>
+	<phpinstall><![CDATA[]]></phpinstall>
+	<phpupgrade><![CDATA[]]></phpupgrade>
+	<phpenable><![CDATA[]]></phpenable>
+	<phpdisable><![CDATA[]]></phpdisable>
+	<phpdelete><![CDATA[]]></phpdelete>
+	<notice><![CDATA[]]></notice>
+	<file name="engine/inc/editnews.php">
+		<operation action="after">
+			<searchcode><![CDATA[					<option value="mass_add_cat">{$lang['add_selcat']}</option>]]></searchcode>
+			<replacecode><![CDATA[					<option value="mass_remove_single_cat">Массовое удаление выбранных категорий</option>]]></replacecode>
+			<enabled>1</enabled>
+		</operation>
+	</file>
+	<file name="engine/inc/massactions.php">
+		<operation action="replace">
+			<searchcode><![CDATA[} elseif( $action == "mass_add_cat" ) {]]></searchcode>
+			<replacecode><![CDATA[} elseif ($action == 'mass_remove_single_cat') {
+    echoheader( "<i class=\"fa fa-comment-o position-left\"></i><span class=\"text-semibold\">{$lang['header_box_title']}</span>", $lang['mass_cat_1'] );
+
+    $count = count( $selected_news );
+    if( $config['allow_multi_category'] ) $category_multiple = "class=\"categoryselect\" multiple";
+    else $category_multiple = "class=\"categoryselect\"";
+
+    echo <<<HTML
+<form method="post">
+<div class="panel panel-default">
+  <div class="panel-heading">
+    {$lang['mass_cat_1']}
+  </div>
+  <div class="panel-body">
+		<table width="100%">
+		    <tr>
+		        <td height="100" class="text-center">Удаление категорий для выбранных новостей (<b>{$count}</b>)<br /><br />
+<select data-placeholder="{$lang['addnews_cat_sel']}" name="remove_single_cat[]" {$category_multiple} style="width:350px;">
+HTML;
+
+    echo CategoryNewsSelection( 0, 0 );
+    echo "</select><br /><br />";
+
+    foreach ( $selected_news as $newsid ) {
+        $newsid = intval($newsid);
+        echo "<input type=hidden name=selected_news[] value=\"$newsid\">";
+    }
+
+    echo <<<HTML
+<input type=hidden name=user_hash value="{$dle_login_hash}"><input type="hidden" name="action" value="do_mass_remove_single_cat"><input type="hidden" name="mod" value="massactions">&nbsp;<input type="submit" value="{$lang['b_start']}" class="btn bg-teal btn-sm btn-raised"></td>
+</td>
+		    </tr>
+		</table>
+  </div>
+</div></form>
+<script>
+$(function(){
+	$('.categoryselect').chosen({allow_single_deselect:true, no_results_text: '{$lang['addnews_cat_fault']}'});
+});
+</script>
+HTML;
+
+    echofooter();
+    exit();
+} elseif( $action == "mass_add_cat" ) {]]></replacecode>
+			<enabled>1</enabled>
+		</operation>
+		<operation action="replace">
+			<searchcode><![CDATA[} elseif( $action == "do_mass_add_cat" ) {]]></searchcode>
+			<replacecode><![CDATA[} elseif ($action == "do_mass_remove_single_cat") {
+    $moved_articles = 0;
+
+    if (!count($_REQUEST['remove_single_cat'])) {
+        msg("error", $lang['mass_cat_notok'], $lang['mass_cat_notok_1'], $_SESSION['admin_referrer']);
+    }
+
+    $category_list = array();
+
+    foreach ($_REQUEST['remove_single_cat'] as $value) {
+        $category_list[] = intval($value);
+    }
+
+    foreach ($selected_news as $id) {
+        $moved_articles++;
+        $id = intval($id);
+
+        $row = $db->super_query("SELECT category, approve FROM " . PREFIX . "_post WHERE id = '{$id}'");
+
+        if ($row['category']) {
+            $news_cats = explode(',', $row['category']);
+            $news_cats = array_diff($news_cats, $category_list);
+            $updated_categories = $db->safesql(implode(',', $news_cats));
+        }
+
+        $db->query("UPDATE " . PREFIX . "_post SET category='{$updated_categories}' WHERE id='{$id}'");
+
+        $db->query("DELETE FROM " . PREFIX . "_post_extras_cats WHERE news_id = '{$id}' AND cat_id IN ('" . implode("','", $category_list) . "')");
+
+        if ($updated_categories && $row['approve']) {
+            $cat_ids = array();
+
+            $cat_ids_arr = explode(",", $updated_categories);
+
+            foreach ($cat_ids_arr as $value) {
+                $cat_ids[] = "('" . $id . "', '" . trim($value) . "')";
+            }
+
+            $cat_ids = implode(", ", $cat_ids);
+            $db->query("INSERT INTO " . PREFIX . "_post_extras_cats (news_id, cat_id) VALUES " . $cat_ids);
+        }
+    }
+
+    $db->query("INSERT INTO " . USERPREFIX . "_admin_logs (name, date, ip, action, extras) values ('" . $db->safesql($member_id['name']) . "', '{$_TIME}', '{$_IP}', '46', '')");
+
+    clear_cache();
+
+    if (count($selected_news) == $moved_articles) {
+        msg("success", $lang['cat_addok'], "Удаление категорий ({$moved_articles}) - прошло успешно!", $_SESSION['admin_referrer']);
+    } else {
+        msg("error", $lang['mass_cat_notok'], $lang['mass_cat_notok_1'], $_SESSION['admin_referrer']);
+    }
+
+} elseif( $action == "do_mass_add_cat" ) {]]></replacecode>
+			<enabled>1</enabled>
+		</operation>
+	</file>
+</dleplugin>
